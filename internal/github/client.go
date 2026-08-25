@@ -13,9 +13,9 @@ type Client struct {
 	Timeout time.Duration
 }
 
-func FetchEventsWithETag(client *Client, url, username, etag string, maxRetries int, baseDelay, maxDelay time.Duration) ([]byte, string, int, error) {
+func (c *Client) FetchEventsWithETag(url, username, etag string, maxRetries int, baseDelay, maxDelay time.Duration) ([]byte, string, int, error) {
 	httpClient := &http.Client{
-		Timeout: client.Timeout,
+		Timeout: c.Timeout,
 	}
 
 	var lastErr error
@@ -28,7 +28,7 @@ func FetchEventsWithETag(client *Client, url, username, etag string, maxRetries 
 
 		req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 		if err != nil {
-			return nil, "", 0, fmt.Errorf("Error creating request: %v", err)
+			return nil, "", 0, fmt.Errorf("failed to create request: %v", err)
 		}
 		req.Header.Set("User-Agent", "GitHubEventsCLI/1.0")
 		if etag != "" {
@@ -49,7 +49,6 @@ func FetchEventsWithETag(client *Client, url, username, etag string, maxRetries 
 		}
 		defer resp.Body.Close()
 
-		// Read body – for 304 it will be empty
 		body, err = io.ReadAll(resp.Body)
 		if err != nil {
 			lastErr = err
@@ -75,7 +74,7 @@ func FetchEventsWithETag(client *Client, url, username, etag string, maxRetries 
 		}
 
 		if status == http.StatusNotFound {
-			return nil, "", status, fmt.Errorf("User '%s' does not exist (404 Not Found).", username)
+			return nil, "", status, fmt.Errorf("user '%s' does not exist (404 Not Found)", username)
 		}
 
 		if status == http.StatusForbidden {
@@ -92,7 +91,7 @@ func FetchEventsWithETag(client *Client, url, username, etag string, maxRetries 
 					}
 				}
 			}
-			return nil, "", status, fmt.Errorf("Access forbidden (403). Check rate limits or authentication.\nResponse body: %s", string(body))
+			return nil, "", status, fmt.Errorf("access forbidden (403) – check rate limits or authentication\nResponse: %s", string(body))
 		}
 
 		if status >= 500 && status <= 599 {
@@ -107,16 +106,16 @@ func FetchEventsWithETag(client *Client, url, username, etag string, maxRetries 
 			continue
 		}
 
-		return nil, "", status, fmt.Errorf("Unexpected status %d: %s", status, string(body))
+		return nil, "", status, fmt.Errorf("unexpected status %d: %s", status, string(body))
 	}
 
 	if lastErr != nil {
-		return nil, "", 0, fmt.Errorf("Failed after %d attempts: %v", maxRetries, lastErr)
+		return nil, "", 0, fmt.Errorf("failed after %d attempts: %v", maxRetries, lastErr)
 	}
 	if resp == nil {
-		return nil, "", 0, fmt.Errorf("Unknown failure – no response")
+		return nil, "", 0, fmt.Errorf("unknown failure – no response")
 	}
-	return nil, "", resp.StatusCode, fmt.Errorf("Failed to get events (status %d).", resp.StatusCode)
+	return nil, "", resp.StatusCode, fmt.Errorf("failed to get events (status %d)", resp.StatusCode)
 }
 
 func backoffDelay(attempt int, base, max time.Duration) time.Duration {
