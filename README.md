@@ -132,3 +132,6 @@ github-events-cli/
 Contributions are welcome! Feel free to open issues or pull requests.
 
 ---
+
+## The roadmap project URL:
+https://roadmap.sh/projects/github-user-activity
