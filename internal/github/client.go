@@ -13,7 +13,7 @@ type Client struct {
 	Timeout time.Duration
 }
 
-func FetchEvents(client *Client, url, username string, maxRetries int, baseDelay, maxDelay time.Duration) ([]byte, error) {
+func FetchEventsWithETag(client *Client, url, username, etag string, maxRetries int, baseDelay, maxDelay time.Duration) ([]byte, string, int, error) {
 	httpClient := &http.Client{
 		Timeout: client.Timeout,
 	}
@@ -28,9 +28,12 @@ func FetchEvents(client *Client, url, username string, maxRetries int, baseDelay
 
 		req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 		if err != nil {
-			return nil, fmt.Errorf("Error creating request: %v", err)
+			return nil, "", 0, fmt.Errorf("Error creating request: %v", err)
 		}
 		req.Header.Set("User-Agent", "GitHubEventsCLI/1.0")
+		if etag != "" {
+			req.Header.Set("If-None-Match", etag)
+		}
 
 		resp, err = httpClient.Do(req)
 		if err != nil {
@@ -46,6 +49,7 @@ func FetchEvents(client *Client, url, username string, maxRetries int, baseDelay
 		}
 		defer resp.Body.Close()
 
+		// Read body – for 304 it will be empty
 		body, err = io.ReadAll(resp.Body)
 		if err != nil {
 			lastErr = err
@@ -60,12 +64,18 @@ func FetchEvents(client *Client, url, username string, maxRetries int, baseDelay
 		}
 
 		status := resp.StatusCode
+
+		if status == http.StatusNotModified {
+			return nil, etag, status, nil
+		}
+
 		if status == http.StatusOK {
-			return body, nil
+			newEtag := resp.Header.Get("ETag")
+			return body, newEtag, status, nil
 		}
 
 		if status == http.StatusNotFound {
-			return nil, fmt.Errorf("User '%s' does not exist (404 Not Found).", username)
+			return nil, "", status, fmt.Errorf("User '%s' does not exist (404 Not Found).", username)
 		}
 
 		if status == http.StatusForbidden {
@@ -82,7 +92,7 @@ func FetchEvents(client *Client, url, username string, maxRetries int, baseDelay
 					}
 				}
 			}
-			return nil, fmt.Errorf("Access forbidden (403). Check rate limits or authentication.\nResponse body: %s", string(body))
+			return nil, "", status, fmt.Errorf("Access forbidden (403). Check rate limits or authentication.\nResponse body: %s", string(body))
 		}
 
 		if status >= 500 && status <= 599 {
@@ -97,16 +107,16 @@ func FetchEvents(client *Client, url, username string, maxRetries int, baseDelay
 			continue
 		}
 
-		return nil, fmt.Errorf("Unexpected status %d: %s", status, string(body))
+		return nil, "", status, fmt.Errorf("Unexpected status %d: %s", status, string(body))
 	}
 
 	if lastErr != nil {
-		return nil, fmt.Errorf("Failed after %d attempts: %v", maxRetries, lastErr)
+		return nil, "", 0, fmt.Errorf("Failed after %d attempts: %v", maxRetries, lastErr)
 	}
-	if resp == nil || resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("Failed to get events (status %d).", resp.StatusCode)
+	if resp == nil {
+		return nil, "", 0, fmt.Errorf("Unknown failure – no response")
 	}
-	return nil, fmt.Errorf("Unknown failure")
+	return nil, "", resp.StatusCode, fmt.Errorf("Failed to get events (status %d).", resp.StatusCode)
 }
 
 func backoffDelay(attempt int, base, max time.Duration) time.Duration {
